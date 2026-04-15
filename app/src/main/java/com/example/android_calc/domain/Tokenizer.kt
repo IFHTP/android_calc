@@ -10,19 +10,30 @@ class Tokenizer {
                 char.isWhitespace() -> i++
                 char.isDigit() || char == '.' -> {
                     val sb = StringBuilder()
-                    while (i < expression.length && (expression[i].isDigit() || expression[i] == '.')) {
-                        sb.append(expression[i++])
+                    while (i < expression.length && (expression[i].isDigit() || expression[i] == '.' || expression[i].lowercaseChar() == 'e')) {
+                        if (expression[i].lowercaseChar() == 'e') {
+                            sb.append(expression[i++])
+                            if (i < expression.length && (expression[i] == '+' || expression[i] == '-')) {
+                                sb.append(expression[i++])
+                            }
+                        } else {
+                            sb.append(expression[i++])
+                        }
                     }
-                    tokens.add(Token.Number(sb.toString().toDouble()))
+                    val numStr = sb.toString()
+                    try {
+                        tokens.add(Token.Number(numStr.toDouble()))
+                    } catch (e: Exception) {
+                    }
                 }
-                char.isLetter() -> {
+                char.isLetter() || char == 'π' -> {
                     val sb = StringBuilder()
-                    while (i < expression.length && expression[i].isLetter()) {
+                    while (i < expression.length && (expression[i].isLetter() || expression[i] == 'π')) {
                         sb.append(expression[i++])
                     }
                     val word = sb.toString().lowercase()
                     val token = when (word) {
-                        "pi" -> Token.Number(Math.PI)
+                        "pi", "π" -> Token.Number(Math.PI)
                         "e" -> Token.Number(Math.E)
                         "sin" -> Token.Operator(Token.Type.SIN, 4, true)
                         "cos" -> Token.Operator(Token.Type.COS, 4, true)
@@ -30,7 +41,7 @@ class Tokenizer {
                         "arcsin" -> Token.Operator(Token.Type.ARCSIN, 4, true)
                         "arccos" -> Token.Operator(Token.Type.ARCCOS, 4, true)
                         "arctan" -> Token.Operator(Token.Type.ARCTAN, 4, true)
-                        "sqrt" -> Token.Operator(Token.Type.SQRT, 4, false)
+                        "sqrt", "√" -> Token.Operator(Token.Type.SQRT, 4, true)
                         "ln" -> Token.Operator(Token.Type.LN, 4, true)
                         "lg" -> Token.Operator(Token.Type.LG, 4, true)
                         "fact" -> Token.Operator(Token.Type.FACT, priority = 5, false)
@@ -38,6 +49,10 @@ class Tokenizer {
                         else -> throw IllegalArgumentException("Unknown function: $word")
                     }
                     tokens.add(token)
+                }
+                char == '√' -> {
+                    tokens.add(Token.Operator(Token.Type.SQRT, 4, true))
+                    i++
                 }
                 char == '+' -> {
                     tokens.add(Token.Operator(Token.Type.PLUS, 1, false))
@@ -76,6 +91,7 @@ class Tokenizer {
                     tokens.add(Token.Parenthesis(false))
                     i++
                 }
+                else -> i++
             }
         }
         return tokens.toList()
