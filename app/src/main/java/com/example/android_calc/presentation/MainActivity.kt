@@ -1,7 +1,12 @@
 package com.example.android_calc.presentation
 
+import android.content.Context
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,14 +16,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -96,7 +99,7 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                             softWrap = false
                         )
                     }
-                    
+
                     Text(
                         text = if (state.result.isEmpty()) "0" else state.result,
                         fontSize = resFontSize,
@@ -115,7 +118,7 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                         .weight(1.5f)
                         .fillMaxHeight()
                 ) {
-                    CalculatorKeyboard(viewModel, isLandscape)
+                    CalculatorKeyboard(viewModel)
                 }
             }
         } else {
@@ -124,12 +127,13 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(vertical = 8.dp)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
+                        .weight(1f)
+                        .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.Bottom,
                     horizontalAlignment = Alignment.End
                 ) {
@@ -151,7 +155,7 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                             softWrap = false
                         )
                     }
-                    
+
                     Text(
                         text = if (state.result.isEmpty()) "0" else state.result,
                         fontSize = resFontSize,
@@ -168,7 +172,7 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Box(modifier = Modifier.weight(2f)) {
-                    CalculatorKeyboard(viewModel, isLandscape)
+                    CalculatorKeyboard(viewModel)
                 }
             }
         }
@@ -176,7 +180,7 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
 }
 
 @Composable
-fun CalculatorKeyboard(viewModel: CalculatorViewModel, isLandscape: Boolean) {
+fun CalculatorKeyboard(viewModel: CalculatorViewModel) {
     val buttons = listOf(
         listOf("sin", "cos", "tan", "√"),
         listOf("lg", "ln", "(", ")"),
@@ -229,11 +233,9 @@ fun CalculatorKeyboard(viewModel: CalculatorViewModel, isLandscape: Boolean) {
 
 private fun formatExpression(expression: String): String {
     if (expression.isEmpty()) return ""
-
     val sb = StringBuilder()
     val lineLimit = 15
     val operators = setOf('+', '-', '×', '÷', '^', '*', '/')
-
     val tokens = mutableListOf<String>()
     var currentToken = ""
     for (char in expression) {
@@ -246,21 +248,17 @@ private fun formatExpression(expression: String): String {
         }
     }
     if (currentToken.isNotEmpty()) tokens.add(currentToken)
-
     var currentLineLength = 0
     for (i in tokens.indices) {
         val token = tokens[i]
-
         if (token.length == 1 && token[0] in operators) {
             val nextNumber = if (i + 1 < tokens.size) tokens[i + 1] else ""
             val totalNeeded = 1 + nextNumber.length
-
             if (currentLineLength + totalNeeded > lineLimit && currentLineLength > 0) {
                 sb.append("\n")
                 currentLineLength = 0
             }
         }
-
         if (token.length > lineLimit) {
             token.chunked(lineLimit).forEachIndexed { index, part ->
                 sb.append(part)
@@ -276,7 +274,6 @@ private fun formatExpression(expression: String): String {
             currentLineLength += token.length
         }
     }
-
     return sb.toString()
 }
 
@@ -286,27 +283,38 @@ fun CalcButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val isDark = isSystemInDarkTheme()
     val isOrangeText = symbol.lowercase() in listOf("ac", "%", "÷", "×", "-", "+", "=", "⌫")
-    val containerColor = Color.Transparent 
-
     val contentColor = when {
         isOrangeText -> MaterialTheme.colorScheme.primary 
         isDark -> Color.Gray 
         else -> Color.Black 
     }
 
-    val fontSize = when {
-        symbol.length > 2 -> 20.sp
-        else -> 20.sp
-    }
-
     Button(
-        onClick = onClick,
+        onClick = {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator
+            } else {
+                context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
+            } else {
+                vibrator.vibrate(100)
+            }
+
+            onClick()
+        },
         modifier = modifier,
         shape = RoundedCornerShape(0.dp), 
         colors = ButtonDefaults.buttonColors(
-            containerColor = containerColor,
+            containerColor = Color.Transparent,
             contentColor = contentColor
         ),
         contentPadding = PaddingValues(0.dp),
@@ -314,7 +322,7 @@ fun CalcButton(
     ) {
         Text(
             text = symbol,
-            fontSize = fontSize,
+            fontSize = 20.sp,
             fontWeight = if (isOrangeText) FontWeight.Bold else FontWeight.Medium,
             textAlign = TextAlign.Center
         )

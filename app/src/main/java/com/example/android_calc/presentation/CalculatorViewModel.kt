@@ -19,19 +19,20 @@ class CalculatorViewModel : ViewModel() {
 
     private val operators = setOf('+', '-', '×', '÷', '%', '^')
     private val constants = setOf('π', 'e')
-    private val functions = listOf("sin(", "cos(", "tan(", "lg(", "ln(", "√(“, \"arcsin(\", \"arccos(\", \"arctan(")
+    private val functions = listOf("sin(", "cos(", "tan(", "lg(", "ln(", "√(", "arcsin(", "arccos(", "arctan(")
 
     private fun needsInternalMultiply(expr: String): Boolean {
         if (expr.isEmpty()) return false
         val last = expr.last()
-        return last.isDigit() || last == ')' || last in constants
+        return last.isDigit() || last == ')' || last in constants || last == '!'
     }
 
     fun onNumberClick(number: String) {
         if (_state.value.isFinal) onClearClick()
         val expr = _state.value.expression
         
-        val prefix = if (expr.isNotEmpty() && (expr.last() == ')' || expr.last() in constants)) "×" else ""
+        // Исправление: если последним был факториал, добавляем знак умножения перед цифрой
+        val prefix = if (expr.isNotEmpty() && (expr.last() == ')' || expr.last() in constants || expr.last() == '!')) "×" else ""
         val newExpr = expr + prefix + number
 
         val delimiters = (operators + '(' + ')').toCharArray()
@@ -77,6 +78,9 @@ class CalculatorViewModel : ViewModel() {
 
         if (expr.isEmpty() || expr.last() in operators || expr.last() == '(') {
             _state.update { it.copy(expression = expr + "0.") }
+        } else if (expr.last() == ')' || expr.last() == '!') {
+            // Исправление: при нажатии точки после закрывающей скобки или факториала добавляем умножение
+            _state.update { it.copy(expression = expr + "×0.") }
         } else {
             val delimiters = (operators + '(' + ')').toCharArray()
             val lastPart = expr.split(*delimiters).last()
@@ -100,7 +104,7 @@ class CalculatorViewModel : ViewModel() {
         if (_state.value.isFinal) prepareForChaining()
         val expr = _state.value.expression
         if (bracket == "(") {
-            val prefix = if (needsInternalMultiply(expr)) "*" else ""
+            val prefix = if (needsInternalMultiply(expr)) "×" else ""
             _state.update { it.copy(expression = expr + prefix + "(") }
         } else {
             val openCount = expr.count { it == '(' }
@@ -210,10 +214,8 @@ class CalculatorViewModel : ViewModel() {
         val currentExpr = _state.value.expression
         if (currentExpr.isEmpty()) return
 
-        val funcList = listOf("sin(", "cos(", "tan(", "lg(", "ln(", "√(“, \"arcsin(\", \"arccos(\", \"arctan(")
-        
         var found = false
-        for (f in funcList) {
+        for (f in functions) {
             if (currentExpr.endsWith(f)) {
                 _state.update { it.copy(expression = currentExpr.dropLast(f.length), isFinal = false) }
                 found = true
