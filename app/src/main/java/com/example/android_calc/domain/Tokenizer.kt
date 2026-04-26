@@ -67,11 +67,11 @@ class Tokenizer {
                     }
                     i++
                 }
-                char == '*' -> {
+                char == '×' -> {
                     tokens.add(Token.Operator(Token.Type.MULTIPLY, 2, false))
                     i++
                 }
-                char == '/' -> {
+                char == '÷' -> {
                     tokens.add(Token.Operator(Token.Type.DIVIDE, 2, false))
                     i++
                 }
