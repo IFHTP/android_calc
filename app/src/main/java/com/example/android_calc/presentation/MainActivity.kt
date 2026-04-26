@@ -9,7 +9,6 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -29,18 +28,109 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.android_calc.ui.theme.Android_calcTheme
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.google.firebase.Firebase
+import com.google.firebase.remoteconfig.remoteConfig
+import com.google.firebase.remoteconfig.remoteConfigSettings
+import com.google.firebase.remoteconfig.ConfigUpdate
+import com.google.firebase.remoteconfig.ConfigUpdateListener
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigException
+import androidx.core.graphics.toColorInt
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+//import android.util.Log
+import androidx.core.app.NotificationCompat
+//import com.google.firebase.messaging.FirebaseMessaging
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                101
+            )
+        }
+
+//        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+//            if (task.isSuccessful) {
+//                val token = task.result
+//                Log.d("FCM_TOKEN", "FCM_TOKEN: $token")
+//            } else {
+//                Log.e("FCM_TOKEN", "ERROR", task.exception)
+//            }
+//        }
+
+        val remoteConfig = Firebase.remoteConfig
+        val configSettings = remoteConfigSettings {
+            minimumFetchIntervalInSeconds = 0
+        }
+        remoteConfig.setConfigSettingsAsync(configSettings)
+
+        remoteConfig.fetchAndActivate().addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val colorHex = remoteConfig.getString("status_bar_color")
+                applyStatusBarColor(colorHex)
+            }
+        }
+        remoteConfig.addOnConfigUpdateListener(object : ConfigUpdateListener {
+            override fun onUpdate(configUpdate: ConfigUpdate) {
+                if (configUpdate.updatedKeys.contains("status_bar_color")) {
+                    remoteConfig.activate().addOnCompleteListener {
+                        applyStatusBarColor(remoteConfig.getString("status_bar_color"))
+                        sendLocalNotification(remoteConfig.getString("status_bar_color"))
+                    }
+                }
+            }
+            override fun onError(error: FirebaseRemoteConfigException) {
+                android.util.Log.e("Firebase", "Update error", error)
+            }
+        })
+
         setContent {
             Android_calcTheme {
                 val viewModel: CalculatorViewModel = viewModel()
                 CalculatorScreen(viewModel)
             }
         }
+    }
+
+    private fun applyStatusBarColor(colorHex: String) {
+        if (colorHex.isEmpty()) return
+        try {
+            val colorInt = colorHex.toColorInt()
+            window.statusBarColor = colorInt
+
+            val isLightColor = androidx.core.graphics.ColorUtils.calculateLuminance(colorInt) > 0.5
+            val view = window.decorView
+            androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = isLightColor
+            }
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun sendLocalNotification(newColor: String) {
+        val channelId = "color_updates"
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "Updates", NotificationManager.IMPORTANCE_HIGH)
+            manager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Bar color changed to: $newColor")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .build()
+
+        manager.notify(1, notification)
     }
 }
 
