@@ -7,5 +7,8 @@ data class CalculationState(
     val result: String = "",
     val isFinal: Boolean = false,
     val history: List<HistoryItem> = emptyList(),
-    val isHistoryVisible: Boolean = false
+    val isHistoryVisible: Boolean = false,
+    val isAuthNeeded: Boolean = true,
+    val isSetupNeeded: Boolean = false,
+    val authError: String? = null
 )

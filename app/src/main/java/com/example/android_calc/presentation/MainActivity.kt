@@ -7,8 +7,11 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.android_calc.ui.theme.Android_calcTheme
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -42,17 +48,29 @@ import androidx.core.graphics.toColorInt
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import androidx.activity.enableEdgeToEdge
 import androidx.core.app.NotificationCompat
+import androidx.core.view.WindowCompat
 import com.example.android_calc.data.HistoryItem
+import com.example.android_calc.data.SecurityManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+import android.util.Log
+import com.google.firebase.messaging.FirebaseMessaging
+
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
+
+        fetchFcmToken()
+
         super.onCreate(savedInstanceState)
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             androidx.core.app.ActivityCompat.requestPermissions(
@@ -96,6 +114,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    fun fetchFcmToken() {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                Log.w("FCM_DEBUG", "Fetching FCM registration token failed", task.exception)
+                return@addOnCompleteListener
+            }
+
+            val token = task.result
+
+            Log.d("FCM_DEBUG", "Current FCM Token: $token")
+        }
+    }
+
+    fun showBiometricPrompt(onSuccess: () -> Unit) {
+        val executor = ContextCompat.getMainExecutor(this)
+        val biometricPrompt = BiometricPrompt(this, executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    Toast.makeText(applicationContext, "Auth error: $errString", Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    onSuccess()
+                }
+
+                override fun onAuthenticationFailed() {
+                    super.onAuthenticationFailed()
+                    Toast.makeText(applicationContext, "Auth failed", Toast.LENGTH_SHORT).show()
+                }
+            })
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Verify Identity")
+            .setSubtitle("Authenticate using your device security to reset Pass Key")
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build()
+
+        biometricPrompt.authenticate(promptInfo)
+    }
+
     private fun applyStatusBarColor(colorHex: String) {
         if (colorHex.isEmpty()) return
         try {
@@ -136,16 +196,89 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current as MainActivity
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var showMenu by remember { mutableStateOf(false) }
+    var changePassKeyStep by remember { mutableStateOf(0) }
+    var confirmedOldKey by remember { mutableStateOf("") }
+    var localAuthError by remember { mutableStateOf<String?>(null) }
+
+    if (state.isSetupNeeded) {
+        AuthDialog(
+            title = "Setup Pass Key",
+            buttonText = "Set Pass Key",
+            error = state.authError,
+            onConfirm = { viewModel.onSetupPassKey(it) },
+            showForgot = false
+        )
+    } else if (state.isAuthNeeded) {
+        AuthDialog(
+            title = "Enter Pass Key",
+            buttonText = "Login",
+            error = state.authError,
+            onConfirm = { viewModel.onAuthInput(it) },
+            showForgot = true,
+            onForgot = {
+                context.showBiometricPrompt {
+                    viewModel.resetPassKey()
+                }
+            }
+        )
+    }
+
+    if (changePassKeyStep == 1) {
+        AuthDialog(
+            title = "Confirm Old Pass Key",
+            buttonText = "Next",
+            error = localAuthError,
+            onConfirm = { input ->
+                val securityManager = SecurityManager(context)
+                if (input == securityManager.getPassKey()) {
+                    confirmedOldKey = input
+                    localAuthError = null
+                    changePassKeyStep = 2
+                } else {
+                    localAuthError = "Incorrect Old Pass Key"
+                }
+            },
+            showForgot = true,
+            onForgot = {
+                context.showBiometricPrompt {
+                    changePassKeyStep = 0
+                    viewModel.resetPassKey()
+                }
+            },
+            onDismiss = { changePassKeyStep = 0; localAuthError = null }
+        )
+    } else if (changePassKeyStep == 2) {
+        AuthDialog(
+            title = "Enter New Pass Key",
+            buttonText = "Change",
+            error = state.authError,
+            onConfirm = { newKey ->
+                viewModel.onChangePassKey(confirmedOldKey, newKey)
+                if (state.authError?.contains("successfully") == true) {
+                    changePassKeyStep = 0
+                    confirmedOldKey = ""
+                }
+            },
+            showForgot = false,
+            onDismiss = { changePassKeyStep = 0 }
+        )
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { },
-                actions = {
+            if (!state.isHistoryVisible) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 4.dp),
+                    contentAlignment = Alignment.TopEnd
+                ) {
                     IconButton(onClick = { showMenu = !showMenu }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Menu")
                     }
@@ -160,18 +293,23 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                                 viewModel.toggleHistory(true)
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("Change Pass Key") },
+                            onClick = {
+                                showMenu = false
+                                changePassKeyStep = 1
+                            }
+                        )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                )
-            )
-        }
+                }
+            }
+        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { paddingValues ->
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(if (state.isHistoryVisible) PaddingValues(0.dp) else paddingValues),
             color = MaterialTheme.colorScheme.background
         ) {
             if (state.isHistoryVisible) {
@@ -180,7 +318,10 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                     onBack = { viewModel.toggleHistory(false) }
                 )
             } else {
-                val exprFontSize = if (isLandscape) 20.sp else (if (state.isFinal) 24.sp else 36.sp)
+                val systemInsets = WindowInsets.systemBars.asPaddingValues()
+                val displayCutoutPadding = WindowInsets.displayCutout.asPaddingValues()
+                
+                val exprFontSize = if (isLandscape) 15.sp else (if (state.isFinal) 19.sp else 31.sp)
                 val resFontSize = if (isLandscape) 28.sp else (if (state.isFinal) 42.sp else 28.sp)
                 val resColor = if (state.isFinal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -195,7 +336,8 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                     Row(
                         modifier = Modifier
                             .fillMaxSize()
-                            .navigationBarsPadding()
+                            .padding(systemInsets)
+                            .padding(displayCutoutPadding)
                             .padding(8.dp)
                     ) {
                         Column(
@@ -250,7 +392,7 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .navigationBarsPadding()
+                            .padding(systemInsets)
                             .padding(vertical = 8.dp)
                     ) {
                         Column(
@@ -306,35 +448,91 @@ fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
 }
 
 @Composable
-fun HistoryView(history: List<HistoryItem>, onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("History", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            TextButton(onClick = onBack) {
-                Text("Back")
-            }
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        if (history.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No history yet")
-            }
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(history) { item ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
+fun AuthDialog(
+    title: String,
+    buttonText: String,
+    error: String?,
+    onConfirm: (String) -> Unit,
+    showForgot: Boolean = false,
+    onForgot: () -> Unit = {},
+    onDismiss: (() -> Unit)? = null
+) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { onDismiss?.invoke() },
+        title = { Text(title) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Pass Key") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                if (error != null) {
+                    Text(error, color = if (error.contains("success")) Color.Green else Color.Red, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+                if (showForgot) {
+                    TextButton(
+                        onClick = onForgot,
+                        modifier = Modifier.align(Alignment.End)
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Forgot Pass Key?", fontSize = 12.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(text) }) {
+                Text(buttonText)
+            }
+        },
+        dismissButton = if (onDismiss != null) {
+            {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        } else null
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HistoryView(history: List<HistoryItem>, onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("History", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent
+                )
+            )
+        }
+    ) { paddingValues ->
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp)) {
+            if (history.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No history yet")
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(history) { item ->
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.timestamp))
                             Text(date, fontSize = 12.sp, color = Color.Gray)
                             Text(item.expression, fontSize = 18.sp)
                             Text(item.result, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            HorizontalDivider(modifier = Modifier.padding(top = 8.dp), thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
                         }
                     }
                 }
@@ -398,44 +596,59 @@ fun CalculatorKeyboard(viewModel: CalculatorViewModel) {
 private fun formatExpression(expression: String): String {
     if (expression.isEmpty()) return ""
     val sb = StringBuilder()
-    val lineLimit = 15
+    val lineLimit = 20
     val operators = setOf('+', '-', '×', '÷', '^', '*', '/')
     val tokens = mutableListOf<String>()
-    var currentToken = ""
-    for (char in expression) {
-        if (char in operators || char == '(' || char == ')') {
-            if (currentToken.isNotEmpty()) tokens.add(currentToken)
-            tokens.add(char.toString())
-            currentToken = ""
-        } else {
-            currentToken += char
-        }
-    }
-    if (currentToken.isNotEmpty()) tokens.add(currentToken)
-    var currentLineLength = 0
-    for (i in tokens.indices) {
-        val token = tokens[i]
-        if (token.length == 1 && token[0] in operators) {
-            val nextNumber = if (i + 1 < tokens.size) tokens[i + 1] else ""
-            val totalNeeded = 1 + nextNumber.length
-            if (currentLineLength + totalNeeded > lineLimit && currentLineLength > 0) {
-                sb.append("\n")
-                currentLineLength = 0
+    
+    var i = 0
+    while (i < expression.length) {
+        val char = expression[i]
+        when {
+            char in operators || char == '(' || char == ')' -> {
+                tokens.add(char.toString())
+                i++
+            }
+            char.isLetter() || char == '√' -> {
+                val start = i
+                while (i < expression.length && (expression[i].isLetter() || expression[i] == '(' || expression[i] == '√')) {
+                    val current = expression[i]
+                    i++
+                    if (current == '(') break
+                }
+                tokens.add(expression.substring(start, i))
+            }
+            else -> {
+                val start = i
+                while (i < expression.length && (expression[i].isDigit() || expression[i] == '.' || expression[i] == '!')) {
+                    i++
+                }
+                tokens.add(expression.substring(start, i))
             }
         }
-        if (token.length > lineLimit) {
+    }
+
+    var currentLineLength = 0
+    for (token in tokens) {
+        val tokenLength = token.length
+        
+        if (currentLineLength + tokenLength > lineLimit && currentLineLength > 0) {
+            sb.append("\n")
+            currentLineLength = 0
+        }
+
+        if (tokenLength > lineLimit) {
             token.chunked(lineLimit).forEachIndexed { index, part ->
                 sb.append(part)
-                if (index < token.chunked(lineLimit).size - 1) {
+                if (index < (tokenLength - 1) / lineLimit) {
                     sb.append("\n")
-                    currentLineLength = part.length
+                    currentLineLength = 0
                 } else {
                     currentLineLength = part.length
                 }
             }
         } else {
             sb.append(token)
-            currentLineLength += token.length
+            currentLineLength += tokenLength
         }
     }
     return sb.toString()
@@ -455,6 +668,9 @@ fun CalcButton(
         isDark -> Color.Gray 
         else -> Color.Black 
     }
+    
+    val isOperatorSymbol = symbol in listOf("÷", "×", "-", "+", "=")
+    val fontSize = if (isOperatorSymbol) 26.sp else 20.sp
 
     Button(
         onClick = {
@@ -486,7 +702,7 @@ fun CalcButton(
     ) {
         Text(
             text = symbol,
-            fontSize = 20.sp,
+            fontSize = fontSize,
             fontWeight = if (isOrangeText) FontWeight.Bold else FontWeight.Medium,
             textAlign = TextAlign.Center
         )

@@ -64,4 +64,6 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx:24.11.0")
 
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.biometric)
 }
