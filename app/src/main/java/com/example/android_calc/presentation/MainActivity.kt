@@ -11,9 +11,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,9 +42,12 @@ import androidx.core.graphics.toColorInt
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-//import android.util.Log
+import androidx.activity.enableEdgeToEdge
 import androidx.core.app.NotificationCompat
-//import com.google.firebase.messaging.FirebaseMessaging
+import com.example.android_calc.data.HistoryItem
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,15 +61,6 @@ class MainActivity : ComponentActivity() {
                 101
             )
         }
-
-//        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-//            if (task.isSuccessful) {
-//                val token = task.result
-//                Log.d("FCM_TOKEN", "FCM_TOKEN: $token")
-//            } else {
-//                Log.e("FCM_TOKEN", "ERROR", task.exception)
-//            }
-//        }
 
         val remoteConfig = Firebase.remoteConfig
         val configSettings = remoteConfigSettings {
@@ -134,135 +132,211 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalculatorScreen(viewModel: CalculatorViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    val exprFontSize = if (isLandscape) 20.sp else (if (state.isFinal) 24.sp else 36.sp)
-    val resFontSize = if (isLandscape) 28.sp else (if (state.isFinal) 42.sp else 28.sp)
-    val resColor = if (state.isFinal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    var showMenu by remember { mutableStateOf(false) }
 
-    val formattedExpression = formatExpression(state.expression)
-    val scrollState = rememberScrollState()
-
-    LaunchedEffect(formattedExpression) {
-        scrollState.animateScrollTo(scrollState.maxValue)
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        if (isLandscape) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(8.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(end = 16.dp),
-                    verticalArrangement = Arrangement.Bottom,
-                    horizontalAlignment = Alignment.End
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .verticalScroll(scrollState),
-                        contentAlignment = Alignment.BottomEnd
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { },
+                actions = {
+                    IconButton(onClick = { showMenu = !showMenu }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
                     ) {
-                        Text(
-                            text = formattedExpression,
-                            fontSize = exprFontSize,
-                            lineHeight = exprFontSize * 1.1,
-                            textAlign = TextAlign.End,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Light,
-                            modifier = Modifier.fillMaxWidth(),
-                            softWrap = false
+                        DropdownMenuItem(
+                            text = { Text("History") },
+                            onClick = {
+                                showMenu = false
+                                viewModel.toggleHistory(true)
+                            }
                         )
                     }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                )
+            )
+        }
+    ) { paddingValues ->
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            if (state.isHistoryVisible) {
+                HistoryView(
+                    history = state.history,
+                    onBack = { viewModel.toggleHistory(false) }
+                )
+            } else {
+                val exprFontSize = if (isLandscape) 20.sp else (if (state.isFinal) 24.sp else 36.sp)
+                val resFontSize = if (isLandscape) 28.sp else (if (state.isFinal) 42.sp else 28.sp)
+                val resColor = if (state.isFinal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
 
-                    Text(
-                        text = if (state.result.isEmpty()) "0" else state.result,
-                        fontSize = resFontSize,
-                        color = resColor,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier
-                            .padding(top = 8.dp, bottom = 4.dp)
-                            .fillMaxWidth(),
-                        fontWeight = if (state.isFinal) FontWeight.Bold else FontWeight.Normal,
-                        softWrap = true
-                    )
+                val formattedExpression = formatExpression(state.expression)
+                val scrollState = rememberScrollState()
+
+                LaunchedEffect(formattedExpression) {
+                    scrollState.animateScrollTo(scrollState.maxValue)
                 }
 
-                Box(
-                    modifier = Modifier
-                        .weight(1.5f)
-                        .fillMaxHeight()
-                ) {
-                    CalculatorKeyboard(viewModel)
+                if (isLandscape) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .navigationBarsPadding()
+                            .padding(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(end = 16.dp),
+                            verticalArrangement = Arrangement.Bottom,
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                                    .verticalScroll(scrollState),
+                                contentAlignment = Alignment.BottomEnd
+                            ) {
+                                Text(
+                                    text = formattedExpression,
+                                    fontSize = exprFontSize,
+                                    lineHeight = exprFontSize * 1.1,
+                                    textAlign = TextAlign.End,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Light,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    softWrap = false
+                                )
+                            }
+
+                            Text(
+                                text = if (state.result.isEmpty()) "0" else state.result,
+                                fontSize = resFontSize,
+                                color = resColor,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier
+                                    .padding(top = 8.dp, bottom = 4.dp)
+                                    .fillMaxWidth(),
+                                fontWeight = if (state.isFinal) FontWeight.Bold else FontWeight.Normal,
+                                softWrap = true
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1.5f)
+                                .fillMaxHeight()
+                        ) {
+                            CalculatorKeyboard(viewModel)
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .navigationBarsPadding()
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.Bottom,
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                                    .verticalScroll(scrollState),
+                                contentAlignment = Alignment.BottomEnd
+                            ) {
+                                Text(
+                                    text = formattedExpression,
+                                    fontSize = exprFontSize,
+                                    lineHeight = exprFontSize * 1.1,
+                                    textAlign = TextAlign.End,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Light,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    softWrap = false
+                                )
+                            }
+
+                            Text(
+                                text = if (state.result.isEmpty()) "0" else state.result,
+                                fontSize = resFontSize,
+                                color = resColor,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier
+                                    .padding(top = 8.dp, bottom = 4.dp)
+                                    .fillMaxWidth(),
+                                fontWeight = if (state.isFinal) FontWeight.Bold else FontWeight.Normal,
+                                softWrap = true
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Box(modifier = Modifier.weight(2f)) {
+                            CalculatorKeyboard(viewModel)
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun HistoryView(history: List<HistoryItem>, onBack: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("History", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onBack) {
+                Text("Back")
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        if (history.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No history yet")
+            }
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(vertical = 8.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.Bottom,
-                    horizontalAlignment = Alignment.End
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .verticalScroll(scrollState),
-                        contentAlignment = Alignment.BottomEnd
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(history) { item ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text(
-                            text = formattedExpression,
-                            fontSize = exprFontSize,
-                            lineHeight = exprFontSize * 1.1,
-                            textAlign = TextAlign.End,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Light,
-                            modifier = Modifier.fillMaxWidth(),
-                            softWrap = false
-                        )
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+                            Text(date, fontSize = 12.sp, color = Color.Gray)
+                            Text(item.expression, fontSize = 18.sp)
+                            Text(item.result, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
-
-                    Text(
-                        text = if (state.result.isEmpty()) "0" else state.result,
-                        fontSize = resFontSize,
-                        color = resColor,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier
-                            .padding(top = 8.dp, bottom = 4.dp)
-                            .fillMaxWidth(),
-                        fontWeight = if (state.isFinal) FontWeight.Bold else FontWeight.Normal,
-                        softWrap = true
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Box(modifier = Modifier.weight(2f)) {
-                    CalculatorKeyboard(viewModel)
                 }
             }
         }

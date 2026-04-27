@@ -61,4 +61,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.google.firebase.config)
     implementation(libs.google.firebase.messaging)
+    implementation("com.google.firebase:firebase-firestore-ktx:24.11.0")
+
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
 }

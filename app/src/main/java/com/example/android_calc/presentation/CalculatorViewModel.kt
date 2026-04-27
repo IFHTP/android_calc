@@ -2,19 +2,25 @@ package com.example.android_calc.presentation
 
 import androidx.lifecycle.ViewModel
 import com.example.android_calc.domain.*
+import com.example.android_calc.data.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.text.DecimalFormat
 import java.util.Locale
 
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+
 class CalculatorViewModel : ViewModel() {
 
+    private val repository = HistoryRepository()
     private val tokenizer = Tokenizer()
     private val transformer = RpnTransformer()
     private val calculator = RpnCalculator()
 
-    private val _state = MutableStateFlow(CalculatorState())
+    private val _state = MutableStateFlow(CalculationState())
     val state = _state.asStateFlow()
 
     private val operators = setOf('+', '-', '×', '÷', '%', '^')
@@ -31,7 +37,6 @@ class CalculatorViewModel : ViewModel() {
         if (_state.value.isFinal) onClearClick()
         val expr = _state.value.expression
         
-        // Исправление: если последним был факториал, добавляем знак умножения перед цифрой
         val prefix = if (expr.isNotEmpty() && (expr.last() == ')' || expr.last() in constants || expr.last() == '!')) "×" else ""
         val newExpr = expr + prefix + number
 
@@ -79,7 +84,6 @@ class CalculatorViewModel : ViewModel() {
         if (expr.isEmpty() || expr.last() in operators || expr.last() == '(') {
             _state.update { it.copy(expression = expr + "0.") }
         } else if (expr.last() == ')' || expr.last() == '!') {
-            // Исправление: при нажатии точки после закрывающей скобки или факториала добавляем умножение
             _state.update { it.copy(expression = expr + "×0.") }
         } else {
             val delimiters = (operators + '(' + ')').toCharArray()
@@ -168,6 +172,7 @@ class CalculatorViewModel : ViewModel() {
     }
 
     fun onEqualClick() {
+        val expr = _state.value.expression
         val currentResult = _state.value.result
         if (currentResult == "Can't divide by zero" || currentResult == "Error") {
             _state.update { it.copy(isFinal = true) }
@@ -175,7 +180,11 @@ class CalculatorViewModel : ViewModel() {
         }
         if (_state.value.expression.isEmpty()) return
         liveCalculate()
+        val result = _state.value.result
         _state.update { it.copy(isFinal = true) }
+        viewModelScope.launch {
+            repository.saveCalculation(expr, result)
+        }
     }
 
     private fun prepareForChaining() {
@@ -190,10 +199,12 @@ class CalculatorViewModel : ViewModel() {
     }
 
     private fun formatValue(d: Double): String {
+        val absD = abs(d)
         return when {
             d.isInfinite() -> "∞"
             d.isNaN() -> "Error"
-            d >= 1_000_000_000.0 || d <= -1_000_000_000.0 -> {
+            d == 0.0 -> "0"
+            absD >= 1_000_000_000.0 || (absD > 0 && absD < 1e-7) -> {
                 DecimalFormat("0.#######E0").apply {
                     val symbols = decimalFormatSymbols
                     symbols.exponentSeparator = "e"
@@ -208,7 +219,7 @@ class CalculatorViewModel : ViewModel() {
         }
     }
 
-    fun onClearClick() { _state.update { CalculatorState() } }
+    fun onClearClick() { _state.update { CalculationState() } }
 
     fun onBackspaceClick() {
         val currentExpr = _state.value.expression
@@ -228,5 +239,19 @@ class CalculatorViewModel : ViewModel() {
         }
         
         liveCalculate()
+    }
+
+    fun toggleHistory(visible: Boolean) {
+        _state.update { it.copy(isHistoryVisible = visible) }
+        if (visible) {
+            loadHistory()
+        }
+    }
+
+    private fun loadHistory() {
+        viewModelScope.launch {
+            val history = repository.getHistory()
+            _state.update { it.copy(history = history) }
+        }
     }
 }
